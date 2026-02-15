@@ -18,6 +18,7 @@ rp235x-hal = { version = "0.3", features = [
     "critical-section-impl",
     "binary-info",
 ] }
+rtic-sync = "1.4.0"
 
 [dependencies.rtic]
 version = "2.2.0"

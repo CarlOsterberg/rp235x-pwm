@@ -40,27 +40,42 @@ pub static PICOTOOL_ENTRIES: [rp235x_hal::binary_info::EntryAddr; 5] = [
 )]
 mod app {
     use super::*;
-    use cortex_m::prelude::{_embedded_hal_PwmPin};
+    use cortex_m::prelude::{_embedded_hal_PwmPin, _embedded_hal_serial_Write};
+    use rp235x_hal::{gpio, uart};
+    use rtic_sync::{channel::*, make_channel};
 
-    type Uart0 = hal::uart::UartPeripheral<
-        hal::uart::Enabled,
+    type UartRx = uart::Reader<
         hal::pac::UART0,
         (
-            hal::gpio::Pin<hal::gpio::bank0::Gpio0, hal::gpio::FunctionUart, hal::gpio::PullDown>,
-            hal::gpio::Pin<hal::gpio::bank0::Gpio1, hal::gpio::FunctionUart, hal::gpio::PullDown>,
+            gpio::Pin<gpio::bank0::Gpio0, gpio::FunctionUart, gpio::PullDown>,
+            gpio::Pin<gpio::bank0::Gpio1, gpio::FunctionUart, gpio::PullDown>,
         ),
     >;
 
+    type UartTx = uart::Writer<
+        hal::pac::UART0,
+        (
+            gpio::Pin<gpio::bank0::Gpio0, gpio::FunctionUart, gpio::PullDown>,
+            gpio::Pin<gpio::bank0::Gpio1, gpio::FunctionUart, gpio::PullDown>,
+        ),
+    >;
+
+    const UART_READER_CAPACITY: usize = 256;
+    const MSG_Q_CAPACITY: usize = 32;
     type Pwm =
         hal::pwm::Channel<hal::pwm::Slice<hal::pwm::Pwm2, hal::pwm::FreeRunning>, hal::pwm::A>;
 
     #[shared]
-    struct Shared {uart: Uart0,}
+    struct Shared {}
 
     #[local]
     struct Local {
         pwm2channel_a: Pwm,
-        buffer:  [u8; 256],
+        buffer: [u8; UART_READER_CAPACITY],
+        msg_q_sender: Sender<'static, u8, MSG_Q_CAPACITY>,
+        msg_q_receiver: Receiver<'static, u8, MSG_Q_CAPACITY>,
+        uart_tx: UartTx,
+        uart_rx: UartRx,
     }
 
     #[init]
@@ -95,25 +110,26 @@ mod app {
         );
 
         let uart_pins = (
-            pins.gpio0.into_function::<hal::gpio::FunctionUart>(),
-            pins.gpio1.into_function::<hal::gpio::FunctionUart>(),
+            pins.gpio0.into_function::<gpio::FunctionUart>(),
+            pins.gpio1.into_function::<gpio::FunctionUart>(),
         );
 
         let baudrate: u32 = 115_200;
 
         let mut uart =
-            hal::uart::UartPeripheral::new(ctx.device.UART0, uart_pins, &mut ctx.device.RESETS)
+            uart::UartPeripheral::new(ctx.device.UART0, uart_pins, &mut ctx.device.RESETS)
                 .enable(
                     UartConfig::new(baudrate.Hz(), DataBits::Eight, None, StopBits::One),
                     clocks.peripheral_clock.freq(),
                 )
                 .unwrap();
         uart.enable_rx_interrupt();
+        let (uart_rx, uart_tx) = uart.split();
 
         // -------------------------- PWM2 chA gpio4/pin6 --------------------------
         let pwm_slices = Slices::new(ctx.device.PWM, &mut ctx.device.RESETS);
 
-        let funcPwm = pins.gpio4.into_function::<hal::gpio::FunctionPwm>();
+        let funcPwm = pins.gpio4.into_function::<gpio::FunctionPwm>();
         let mut pwm = pwm_slices.pwm2;
         pwm.set_ph_correct();
         pwm.set_div_int(35);
@@ -125,18 +141,25 @@ mod app {
         // this will make it calibrate to be ready for use.
         channel_a.set_duty(20000 / 10);
 
-        let buffer: [u8; 256] = [0; 256];
+        // -------------------------- Message Queue --------------------------
+        let (s, r) = make_channel!(u8, MSG_Q_CAPACITY);
 
-        uart.write_full_blocking(b"Write something and I will echo it back.\r\n");
+        let buffer: [u8; UART_READER_CAPACITY] = [0; UART_READER_CAPACITY];
+
+        uart_tx.write_full_blocking(b"Write something and I will echo it back.\r\n");
 
         hello::spawn().ok();
         esc::spawn().ok();
 
         (
-            Shared {uart},
+            Shared {},
             Local {
                 pwm2channel_a: channel_a,
-                buffer
+                buffer,
+                msg_q_sender: s,
+                msg_q_receiver: r,
+                uart_tx,
+                uart_rx,
             },
         )
     }
@@ -148,48 +171,30 @@ mod app {
         }
     }
 
-    #[task(binds = UART0_IRQ, priority = 1, shared = [uart], local = [buffer])]
-    fn uart_rx_int(mut ctx: uart_rx_int::Context) {
-        ctx.shared.uart.lock(|uart| {
-        uart.write_full_blocking(b"Int Trig.\r\n");
-        let res = uart.read_raw(ctx.local.buffer);
+    #[task(binds = UART0_IRQ, priority = 1, local = [uart_rx, buffer, msg_q_sender])]
+    fn uart_rx_int(ctx: uart_rx_int::Context) {
+        let res = ctx.local.uart_rx.read_raw(ctx.local.buffer);
         match res {
-            Ok(_chars) => {
-                uart.write_full_blocking(ctx.local.buffer);
-            },
-            Err(_) => {
-                uart.write_full_blocking(b"Read Error\r\n");
+            Ok(num_chars) => {
+                for i in 0..num_chars {
+                    match ctx.local.msg_q_sender.try_send(ctx.local.buffer[i]) {
+                        Ok(_) => {}
+                        Err(_) => {}
+                    }
+                }
             }
+            Err(_) => {}
         }
-        });
     }
 
-    #[task(shared = [uart], priority = 2)]
-    async fn hello(mut _ctx: hello::Context) {
+    #[task(local = [uart_tx, msg_q_receiver], priority = 2)]
+    async fn hello(ctx: hello::Context) {
+        let mut _buff_idx: usize = 0;
         let mut _buffer: [u8; 256] = [0; 256];
-        loop {
-            Mono::delay(1000.millis()).await;
-            // ctx.shared.uart.lock(|uart| {
-            //     uart.write_full_blocking(b"Trying to read.\r\n");
-            //     let res = uart.read_full_blocking(&mut buffer);
-            //     match res {
-            //         Ok(_) => {
-            //             uart.write_full_blocking(& buffer);
-            //         }
-            //         Err(rp235x_hal::uart::ReadErrorType::Overrun) => {
-            //             uart.write_full_blocking(b"ReadErrorType::Overrun\r\n");
-            //         }
-            //         Err(rp235x_hal::uart::ReadErrorType::Break) => {
-            //             uart.write_full_blocking(b"ReadErrorType::Break\r\n");
-            //         }
-            //         Err(rp235x_hal::uart::ReadErrorType::Parity) => {
-            //             uart.write_full_blocking(b"ReadErrorType::Parity\r\n");
-            //         }
-            //         Err(rp235x_hal::uart::ReadErrorType::Framing) => {
-            //             uart.write_full_blocking(b"ReadErrorType::Framing\r\n");
-            //         }
-            //     }
-            // });
+        while let Ok(val) = ctx.local.msg_q_receiver.recv().await {
+            ctx.local.uart_tx.write_full_blocking(b"Received:");
+            ctx.local.uart_tx.write(val).unwrap();
+            ctx.local.uart_tx.write_full_blocking(b"\r\n");
         }
     }
 
