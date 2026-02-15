@@ -34,8 +34,7 @@ pub static PICOTOOL_ENTRIES: [rp235x_hal::binary_info::EntryAddr; 5] = [
 
 #[rtic::app(device = rp235x_hal::pac, peripherals = true,
     dispatchers =[
-            TIMER0_IRQ_1,
-            TIMER1_IRQ_1
+            TIMER0_IRQ_1
     ]
 )]
 mod app {
