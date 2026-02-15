@@ -1,6 +1,6 @@
 [package]
 edition = "2024"
-name = "rp235x-project-template"
+name = "rp235x-rtic-pwm"
 version = "0.1.0"
 license = "MIT OR Apache-2.0"
 
@@ -72,6 +72,6 @@ opt-level = 0
 #opt-level = 3
 
 [[bin]]
-name = "rp235x-project-template"
+name = "rp235x-rtic-pwm"
 test = false
 bench = false
