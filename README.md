@@ -1,4 +1,11 @@
-# Hello world on rp pico 235x
+# Pwm motor controller on rp pico 235x
+
+## What do
+
+This program communicates on uart tx on pin 1 and uart rx on pin 2.
+Baudrate 115200, 8 bits, no parity and 1 stop bit.
+Pin 6 is configured to transmit a PWM signal toa ESC,
+*30A XT60 Electronic speed regulator* which is controlling a *A2212 / 13T 1000KV* brushless motor.
 
 ### Installing dependancies
 
