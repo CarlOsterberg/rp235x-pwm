@@ -40,7 +40,7 @@ pub static PICOTOOL_ENTRIES: [rp235x_hal::binary_info::EntryAddr; 5] = [
 )]
 mod app {
     use super::*;
-    use cortex_m::prelude::{_embedded_hal_PwmPin, _embedded_hal_serial_Write};
+    use cortex_m::prelude::{_embedded_hal_PwmPin, _embedded_hal_serial_Read, _embedded_hal_serial_Write};
     use rp235x_hal::{gpio, uart};
     use rtic_sync::{channel::*, make_channel};
 
@@ -59,8 +59,8 @@ mod app {
             gpio::Pin<gpio::bank0::Gpio1, gpio::FunctionUart, gpio::PullDown>,
         ),
     >;
-
-    const UART_READER_CAPACITY: usize = 256;
+    const PWM_TOP: u16 = 20000;
+    const UART_READER_CAPACITY: usize = 32;
     const MSG_Q_CAPACITY: usize = 32;
     type Pwm =
         hal::pwm::Channel<hal::pwm::Slice<hal::pwm::Pwm2, hal::pwm::FreeRunning>, hal::pwm::A>;
@@ -133,22 +133,23 @@ mod app {
         let mut pwm = pwm_slices.pwm2;
         pwm.set_ph_correct();
         pwm.set_div_int(35);
-        pwm.set_top(20000);
+        pwm.set_top(PWM_TOP);
         pwm.enable();
         let mut channel_a = pwm.channel_a;
         channel_a.output_to(funcPwm);
         // Set to minimum throttle for Brushless ESC, 30A XT60 Electronic speed regulator,
         // this will make it calibrate to be ready for use.
-        channel_a.set_duty(20000 / 10);
+        channel_a.set_duty(PWM_TOP / 10);
 
         // -------------------------- Message Queue --------------------------
         let (s, r) = make_channel!(u8, MSG_Q_CAPACITY);
 
         let buffer: [u8; UART_READER_CAPACITY] = [0; UART_READER_CAPACITY];
 
-        uart_tx.write_full_blocking(b"Write something and I will echo it back.\r\n");
+        uart_tx.write_full_blocking(
+            b"Write any number 0-5 to adjust pwm. 0 is no throttle and 5 is maximum.\r\n",
+        );
 
-        hello::spawn().ok();
         esc::spawn().ok();
 
         (
@@ -173,37 +174,42 @@ mod app {
 
     #[task(binds = UART0_IRQ, priority = 1, local = [uart_rx, buffer, msg_q_sender])]
     fn uart_rx_int(ctx: uart_rx_int::Context) {
-        let res = ctx.local.uart_rx.read_raw(ctx.local.buffer);
+        let res = ctx.local.uart_rx.read();
         match res {
-            Ok(num_chars) => {
-                for i in 0..num_chars {
-                    match ctx.local.msg_q_sender.try_send(ctx.local.buffer[i]) {
+            Ok(char) => {
+                    match ctx.local.msg_q_sender.try_send(char) {
                         Ok(_) => {}
                         Err(_) => {}
                     }
                 }
+            _ => {}
+        }
+    }
+
+    #[task(local = [uart_tx, msg_q_receiver, pwm2channel_a], priority = 2)]
+    async fn esc(ctx: esc::Context) {
+        loop {
+            match ctx.local.msg_q_receiver.recv().await {
+                Ok(byte) => {
+                    // Only accept input values 0-5
+                    if matches!(byte, 48 | 49 | 50 | 51 | 52 | 53) {
+                        // Flip the value so that 0 is minimum and 5 maximum throttle.
+                        let divisor: u16 = (10 - (byte - 48)) as u16;
+                        ctx.local
+                            .uart_tx
+                            .write_full_blocking(b"Updating PWM...\r\n");
+                        ctx.local.pwm2channel_a.set_duty(PWM_TOP / divisor);
+                    } else {
+                        ctx.local.uart_tx.write_full_blocking(b"Unhandled data: ");
+                        ctx.local.uart_tx.write(byte).unwrap();
+                        ctx.local.uart_tx.write_full_blocking(b"\r\n");
+                    }
+                }
+                Err(_) => {
+                    ctx.local.uart_tx.write_full_blocking(b"Msg Q error.\r\n");
+                }
             }
-            Err(_) => {}
         }
-    }
-
-    #[task(local = [uart_tx, msg_q_receiver], priority = 2)]
-    async fn hello(ctx: hello::Context) {
-        let mut _buff_idx: usize = 0;
-        let mut _buffer: [u8; 256] = [0; 256];
-        while let Ok(val) = ctx.local.msg_q_receiver.recv().await {
-            ctx.local.uart_tx.write_full_blocking(b"Received:");
-            ctx.local.uart_tx.write(val).unwrap();
-            ctx.local.uart_tx.write_full_blocking(b"\r\n");
-        }
-    }
-
-    #[task(local = [pwm2channel_a], priority = 1)]
-    async fn esc(_ctx: esc::Context) {
-        // ctx.local.pwm2channel_a.set_duty(19_999 / 20);
-        crate::Mono::delay(1000.millis()).await;
-        // ctx.local.pwm2channel_a.set_duty(19_999 / 10);
-        // crate::Mono::delay(5.millis()).await;
     }
 }
 
