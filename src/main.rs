@@ -39,7 +39,7 @@ pub static PICOTOOL_ENTRIES: [rp235x_hal::binary_info::EntryAddr; 5] = [
 )]
 mod app {
     use super::*;
-    use cortex_m::prelude::{_embedded_hal_PwmPin, _embedded_hal_serial_Read, _embedded_hal_serial_Write};
+    use cortex_m::prelude::{_embedded_hal_PwmPin, _embedded_hal_serial_Write};
     use rp235x_hal::{gpio, uart};
     use rtic_sync::{channel::*, make_channel};
 
@@ -171,21 +171,20 @@ mod app {
         }
     }
 
-    #[task(binds = UART0_IRQ, priority = 1, local = [uart_rx, buffer, msg_q_sender])]
+    #[task(binds = UART0_IRQ, priority = 2, local = [uart_rx, buffer, msg_q_sender])]
     fn uart_rx_int(ctx: uart_rx_int::Context) {
-        let res = ctx.local.uart_rx.read();
+        let res = ctx.local.uart_rx.read_raw(ctx.local.buffer);
         match res {
-            Ok(char) => {
-                    match ctx.local.msg_q_sender.try_send(char) {
-                        Ok(_) => {}
-                        Err(_) => {}
+            Ok(chars) => {
+                    for i in 0..chars {
+                        ctx.local.msg_q_sender.try_send(ctx.local.buffer[i]).unwrap();
                     }
                 }
             _ => {}
         }
     }
 
-    #[task(local = [uart_tx, msg_q_receiver, pwm2channel_a], priority = 2)]
+    #[task(local = [uart_tx, msg_q_receiver, pwm2channel_a], priority = 1)]
     async fn esc(ctx: esc::Context) {
         loop {
             match ctx.local.msg_q_receiver.recv().await {
@@ -200,8 +199,15 @@ mod app {
                         ctx.local.pwm2channel_a.set_duty(PWM_TOP / divisor);
                     } else {
                         ctx.local.uart_tx.write_full_blocking(b"Unhandled data: ");
-                        ctx.local.uart_tx.write(byte).unwrap();
-                        ctx.local.uart_tx.write_full_blocking(b"\r\n");
+                        let res = ctx.local.uart_tx.write(byte);
+                        if res.is_err()
+                        {
+                            ctx.local.uart_tx.write_full_blocking(b"Failed transmitt\r\n");
+                        }
+                        else
+                        {
+                            ctx.local.uart_tx.write_full_blocking(b"\r\n");
+                        }
                     }
                 }
                 Err(_) => {
