@@ -39,7 +39,7 @@ pub static PICOTOOL_ENTRIES: [rp235x_hal::binary_info::EntryAddr; 5] = [
 )]
 mod app {
     use super::*;
-    use cortex_m::prelude::{_embedded_hal_PwmPin, _embedded_hal_serial_Write};
+    use cortex_m::prelude::{_embedded_hal_PwmPin};
     use rp235x_hal::{gpio, uart};
     use rtic_sync::{channel::*, make_channel};
 
@@ -186,6 +186,7 @@ mod app {
 
     #[task(local = [uart_tx, msg_q_receiver, pwm2channel_a], priority = 1)]
     async fn esc(ctx: esc::Context) {
+        let mut buffer: [u8;1] = [0];
         loop {
             match ctx.local.msg_q_receiver.recv().await {
                 Ok(byte) => {
@@ -198,16 +199,10 @@ mod app {
                             .write_full_blocking(b"Updating PWM...\r\n");
                         ctx.local.pwm2channel_a.set_duty(PWM_TOP / divisor);
                     } else {
+                        buffer[0] = byte;
                         ctx.local.uart_tx.write_full_blocking(b"Unhandled data: ");
-                        let res = ctx.local.uart_tx.write(byte);
-                        if res.is_err()
-                        {
-                            ctx.local.uart_tx.write_full_blocking(b"Failed transmitt\r\n");
-                        }
-                        else
-                        {
-                            ctx.local.uart_tx.write_full_blocking(b"\r\n");
-                        }
+                        ctx.local.uart_tx.write_full_blocking(&buffer);
+                        ctx.local.uart_tx.write_full_blocking(b"\r\n");
                     }
                 }
                 Err(_) => {
