@@ -37,8 +37,15 @@ cargo run --release
   Also of note is that the special
   [pico-sdk](https://github.com/raspberrypi/pico-sdk) macros which hide
   information in the ELF file in a way that `picotool info` can read it out, are
-  not supported in Rust. An alternative is TBC.
+  not supported in Rust.
 
+**Loading with probe-rs**
+A debugger with swd interface is needed, for example the official Raspberry Pi Pico debugger works.
+The simply wire as the documentation tells you and you can flash and run your program with:
+
+```bash
+probe-rs run path/to/binary --chip RP235x --protocol swd
+```
 
 ## License
 
