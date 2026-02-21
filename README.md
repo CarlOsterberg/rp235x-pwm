@@ -2,9 +2,9 @@
 
 ## What do
 
-This program communicates on uart tx on pin 1 and uart rx on pin 2.
-Baudrate 115200, 8 bits, no parity and 1 stop bit.
-Pin 6 is configured to transmit a PWM signal toa ESC,
+This program communicates on UART tx on Gpio0/pin 1 and UART rx on Gpio1/pin 2.
+The UART settings are: baud rate 115200, 8 bits, no parity and 1 stop bit.
+Gpio4/pin6, gpio8/pin11, gpio12/pin16 and Gpio16/pin21 are configured to transmit a PWM signal to a ESC,
 *30A XT60 Electronic speed regulator* which is controlling a *A2212 / 13T 1000KV* brushless motor.
 
 ### Installing dependancies
@@ -12,40 +12,15 @@ Pin 6 is configured to transmit a PWM signal toa ESC,
 ```sh
 rustup target install thumbv8m.main-none-eabihf
 cargo install flip-link
+cargo install probe-rs-tools # If debugging with SWD
 ```
 
-  
-For a debug build
-```sh
-cargo run
-```
-For a release build
-```sh
-cargo run --release
-```
+## Flashing and running the code
 
-**Loading with picotool**  
-  As ELF files produced by compiling Rust code are completely compatible with ELF
-  files produced by compiling C or C++ code, you can also use the Raspberry Pi
-  tool [picotool](https://github.com/raspberrypi/picotool). The only thing to be
-  aware of is that picotool expects your ELF files to have a `.elf` extension, and
-  by default Rust does not give the ELF files any extension. You can fix this by
-  simply renaming the file.
-
-  This means you can't easily use it as a cargo runner - yet.
-
-  Also of note is that the special
-  [pico-sdk](https://github.com/raspberrypi/pico-sdk) macros which hide
-  information in the ELF file in a way that `picotool info` can read it out, are
-  not supported in Rust.
-
-**Loading with probe-rs**
-A debugger with swd interface is needed, for example the official Raspberry Pi Pico debugger works.
-The simply wire as the documentation tells you and you can flash and run your program with:
-
-```bash
-probe-rs run path/to/binary --chip RP235x --protocol swd
-```
+There are two ways, either you can use the picotool or probe-rs. The pciotool
+requires less tools but you need to put the device into mass storage mode somehow.
+probe-rs is easier to use but you need a debugger supporting swd and to solder the debug pins.
+For details see the [cargo config](.cargo/config.toml).
 
 ## License
 
