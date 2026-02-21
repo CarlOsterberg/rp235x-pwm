@@ -27,7 +27,7 @@ pub static IMAGE_DEF: hal::block::ImageDef = hal::block::ImageDef::secure_exe();
 pub static PICOTOOL_ENTRIES: [rp235x_hal::binary_info::EntryAddr; 5] = [
     rp235x_hal::binary_info::rp_cargo_bin_name!(),
     rp235x_hal::binary_info::rp_cargo_version!(),
-    rp235x_hal::binary_info::rp_program_description!(c"RP2350 RTIC hello world"),
+    rp235x_hal::binary_info::rp_program_description!(c"RP2350 RTIC pwms"),
     rp235x_hal::binary_info::rp_cargo_homepage_url!(),
     rp235x_hal::binary_info::rp_program_build_attribute!(),
 ];
@@ -121,7 +121,7 @@ mod app {
 
         let pwm_slices = Slices::new(ctx.device.PWM, &mut ctx.device.RESETS);
 
-        // -------------------------- UART TX(gpio0/pin1) RX(gpio1/pin2) --------------------------
+        // ------------------ UART TX(gpio0/pin1) RX(gpio1/pin2) ------------------
         let uart_pins = (
             pins.gpio0.into_function::<gpio::FunctionUart>(),
             pins.gpio1.into_function::<gpio::FunctionUart>(),
