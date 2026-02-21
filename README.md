@@ -7,10 +7,6 @@ Baudrate 115200, 8 bits, no parity and 1 stop bit.
 Pin 6 is configured to transmit a PWM signal toa ESC,
 *30A XT60 Electronic speed regulator* which is controlling a *A2212 / 13T 1000KV* brushless motor.
 
-## Known bugs
-
-Special chars eg, å, ä, ö crashes the program currently. 
-
 ### Installing dependancies
 
 ```sh
